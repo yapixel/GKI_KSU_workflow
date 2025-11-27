@@ -237,10 +237,16 @@ jobs:
         run: |
           echo "🔧 Setting up LOCAL CCACHE (no GitHub Actions cache)..."
           
-          # Source local .zshrc to get ccache settings
+          # Extract ccache-related settings from .zshrc (if it exists)
           if [ -f "$HOME/.zshrc" ]; then
-            echo "📋 Sourcing .zshrc for ccache configuration..."
-            source "$HOME/.zshrc" || true
+            echo "📋 Extracting ccache settings from .zshrc..."
+            # Extract only lines that export ccache variables
+            while IFS= read -r line; do
+              if [[ $line =~ ^export[[:space:]]+CCACHE ]]; then
+                eval "$line"
+                echo "  ✓ $line"
+              fi
+            done < "$HOME/.zshrc"
           fi
           
           # Ensure ccache is in PATH
@@ -254,7 +260,7 @@ jobs:
           fi
           
           # Configure ccache to use local directory only
-          # These will override .zshrc settings if needed, or use .zshrc defaults
+          # Workflow env vars take precedence over .zshrc settings
           ccache --set-config=cache_dir=${{ env.CCACHE_DIR }}
           ccache --set-config=max_size=${{ env.CCACHE_MAXSIZE }}
           ccache --set-config=sloppiness=file_macro,locale,time_macros
@@ -268,8 +274,24 @@ jobs:
           echo "📈 CCACHE stats BEFORE build:"
           ccache -s
           
-          # Calculate and save initial hit rate
-          HIT_RATE=$(ccache -s | grep -i "cache hit rate" | grep -Eo "[0-9]+\.[0-9]+" || echo "0.0")
+          # Calculate and save initial hit rate - handle multiple ccache output formats
+          INITIAL_STATS=$(ccache -s)
+          
+          # Try different patterns for hit rate
+          HIT_RATE=$(echo "$INITIAL_STATS" | grep -i "cache hit rate" | grep -Eo "[0-9]+\.[0-9]+" | head -1)
+          
+          # If not found, try calculating from hits/misses
+          if [ -z "$HIT_RATE" ] || [ "$HIT_RATE" = "0.0" ]; then
+            CACHE_HITS=$(echo "$INITIAL_STATS" | grep -i "cache.*hit" | grep -Eo "[0-9]+" | head -1)
+            CACHE_MISSES=$(echo "$INITIAL_STATS" | grep -i "cache.*miss" | grep -Eo "[0-9]+" | head -1)
+            
+            if [ -n "$CACHE_HITS" ] && [ -n "$CACHE_MISSES" ] && [ "$((CACHE_HITS + CACHE_MISSES))" -gt 0 ]; then
+              HIT_RATE=$(awk "BEGIN {printf \"%.1f\", ($CACHE_HITS / ($CACHE_HITS + $CACHE_MISSES)) * 100}")
+            else
+              HIT_RATE="0.0"
+            fi
+          fi
+          
           echo "INITIAL_HIT_RATE=${HIT_RATE}%" >> $GITHUB_ENV
           echo "💾 Initial hit rate: ${HIT_RATE}%"
           
@@ -565,9 +587,13 @@ jobs:
 
       - name: Build Kernel
         run: |
-          # Source local .zshrc for ccache settings
+          # Extract ccache-related settings from .zshrc (if it exists)
           if [ -f "$HOME/.zshrc" ]; then
-            source "$HOME/.zshrc" || true
+            while IFS= read -r line; do
+              if [[ $line =~ ^export[[:space:]]+CCACHE ]]; then
+                eval "$line"
+              fi
+            done < "$HOME/.zshrc"
           fi
           
           cd kernel
@@ -602,18 +628,43 @@ jobs:
           echo "📈 CCACHE stats AFTER build:"
           ccache -s
           
-          # Get final hit rate
-          FINAL_HIT_RATE=$(ccache -s | grep -i "cache hit rate" | grep -Eo "[0-9]+\.[0-9]+" || echo "0.0")
+          # Get final hit rate - handle multiple ccache output formats
+          FINAL_STATS=$(ccache -s)
+          
+          # Try different patterns for hit rate
+          FINAL_HIT_RATE=$(echo "$FINAL_STATS" | grep -i "cache hit rate" | grep -Eo "[0-9]+\.[0-9]+" | head -1)
+          
+          # If not found, try calculating from hits/misses
+          if [ -z "$FINAL_HIT_RATE" ] || [ "$FINAL_HIT_RATE" = "0.0" ]; then
+            CACHE_HITS=$(echo "$FINAL_STATS" | grep -i "cache.*hit" | grep -Eo "[0-9]+" | head -1)
+            CACHE_MISSES=$(echo "$FINAL_STATS" | grep -i "cache.*miss" | grep -Eo "[0-9]+" | head -1)
+            
+            if [ -n "$CACHE_HITS" ] && [ -n "$CACHE_MISSES" ] && [ "$((CACHE_HITS + CACHE_MISSES))" -gt 0 ]; then
+              FINAL_HIT_RATE=$(awk "BEGIN {printf \"%.1f\", ($CACHE_HITS / ($CACHE_HITS + $CACHE_MISSES)) * 100}")
+            else
+              FINAL_HIT_RATE="0.0"
+            fi
+          fi
+          
           echo "FINAL_HIT_RATE=${FINAL_HIT_RATE}%" >> $GITHUB_ENV
           echo "💾 Final hit rate: ${FINAL_HIT_RATE}%"
+          
+          # Calculate improvement
+          INITIAL_RATE="${INITIAL_HIT_RATE%\%}"
+          FINAL_RATE="${FINAL_HIT_RATE}"
+          
+          if [ -n "$INITIAL_RATE" ] && [ "$INITIAL_RATE" != "0.0" ]; then
+            IMPROVEMENT=$(awk "BEGIN {printf \"%.1f\", $FINAL_RATE - $INITIAL_RATE}")
+            echo "📊 Hit rate change: ${IMPROVEMENT}% (${INITIAL_RATE}% → ${FINAL_RATE}%)"
+          fi
           
           # Show final cache size
           CACHE_SIZE=$(du -sh ${{ env.CCACHE_DIR }} | cut -f1)
           echo "📦 Final cache size: $CACHE_SIZE"
           
-          # Show cache stats
+          # Show detailed statistics
           echo "📊 Detailed cache statistics:"
-          ccache -s | grep -E "(hits|misses|cache size|files in cache)"
+          ccache -s | grep -E "(Cacheable calls|Hits|Misses|Hit rate|cache size|files in cache)"
 
       - name: Package Kernel
         run: |
