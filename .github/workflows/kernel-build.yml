@@ -117,32 +117,26 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Cache Kernel Source
-        id: cache-kernel
-        uses: actions/cache@v4
-        with:
-          path: kernel
-          key: kernel-android14-6.1-2025-09-v1
-          restore-keys: |
-            kernel-android14-6.1-2025-09-
-
-      - name: Cache SuSFS Source
-        id: cache-susfs
-        uses: actions/cache@v4
-        with:
-          path: susfs4ksu
-          key: susfs4ksu-gki-android14-6.1-dev-${{ hashFiles('.gitmodules') }}
-          restore-keys: |
-            susfs4ksu-gki-android14-6.1-dev-
-
-      - name: Clone/Update Submodules
+      # NOTE: Using local kernel cache - NO GitHub Actions cache
+      - name: Clone/Update Kernel Source
         run: |
           KERNEL_BRANCH="android14-6.1-2025-09"
-          SUSFS_BRANCH="gki-android14-6.1-dev"
+          KERNEL_CACHE_DIR="/mnt/cache/kernel-android14-6.1"
           
-          # Kernel: reset to upstream or clone fresh
-          if [ -d "kernel/.git" ] && [ -f "kernel/Makefile" ]; then
-            echo "📦 Kernel exists, resetting to upstream..."
+          # Use local persistent cache if available
+          if [ -d "$KERNEL_CACHE_DIR/.git" ] && [ -f "$KERNEL_CACHE_DIR/Makefile" ]; then
+            echo "📦 Using cached kernel from $KERNEL_CACHE_DIR"
+            # Copy from cache instead of cloning
+            cp -r "$KERNEL_CACHE_DIR" kernel
+            cd kernel
+            # Update to latest
+            git fetch origin $KERNEL_BRANCH --depth=1
+            git reset --hard FETCH_HEAD
+            git clean -fdx
+            echo "✅ Kernel updated from cache"
+            cd ..
+          elif [ -d "kernel/.git" ] && [ -f "kernel/Makefile" ]; then
+            echo "📦 Kernel exists in workspace, resetting to upstream..."
             cd kernel
             git fetch origin $KERNEL_BRANCH --depth=1
             git reset --hard FETCH_HEAD
@@ -150,32 +144,17 @@ jobs:
             echo "✅ Kernel reset to upstream and cleaned"
             cd ..
           else
-            echo "📥 Cloning kernel..."
+            echo "📥 Cloning kernel from scratch..."
             rm -rf kernel
             git clone --depth=1 --single-branch -b $KERNEL_BRANCH \
               https://github.com/aosp-mirror/kernel_common.git kernel
-          fi
-          
-          # SuSFS: check for updates or clone
-          if [ -d "susfs4ksu/.git" ] && [ -d "susfs4ksu/kernel_patches" ]; then
-            echo "📦 SuSFS exists, checking for updates..."
-            cd susfs4ksu
-            git fetch origin $SUSFS_BRANCH --depth=1
-            LOCAL=$(git rev-parse HEAD)
-            REMOTE=$(git rev-parse FETCH_HEAD)
-            if [ "$LOCAL" = "$REMOTE" ]; then
-              echo "✅ SuSFS is up to date (cached)"
-            else
-              echo "🔄 SuSFS has updates, resetting..."
-              git reset --hard FETCH_HEAD
-              git clean -fdx
+            
+            # Save to cache for future builds
+            if [ ! -d "$KERNEL_CACHE_DIR" ]; then
+              echo "💾 Saving kernel to cache..."
+              mkdir -p "$(dirname "$KERNEL_CACHE_DIR")"
+              cp -r kernel "$KERNEL_CACHE_DIR"
             fi
-            cd ..
-          else
-            echo "📥 Cloning susfs4ksu..."
-            rm -rf susfs4ksu
-            git clone --depth=1 --single-branch -b $SUSFS_BRANCH \
-              https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
           fi
           
           # Verify kernel
@@ -189,6 +168,61 @@ jobs:
             echo "❌ Kernel not available"
             exit 1
           fi
+
+      # NOTE: Using local SuSFS cache - NO GitHub Actions cache
+      - name: Clone/Update SuSFS Source
+        run: |
+          SUSFS_BRANCH="gki-android14-6.1-dev"
+          SUSFS_CACHE_DIR="/mnt/cache/susfs4ksu-gki-android14-6.1"
+          
+          # Use local persistent cache if available
+          if [ -d "$SUSFS_CACHE_DIR/.git" ] && [ -d "$SUSFS_CACHE_DIR/kernel_patches" ]; then
+            echo "📦 Using cached SuSFS from $SUSFS_CACHE_DIR"
+            # Copy from cache
+            cp -r "$SUSFS_CACHE_DIR" susfs4ksu
+            cd susfs4ksu
+            # Check for updates
+            git fetch origin $SUSFS_BRANCH --depth=1
+            LOCAL=$(git rev-parse HEAD)
+            REMOTE=$(git rev-parse FETCH_HEAD)
+            if [ "$LOCAL" = "$REMOTE" ]; then
+              echo "✅ SuSFS is up to date (cached)"
+            else
+              echo "🔄 SuSFS has updates, resetting..."
+              git reset --hard FETCH_HEAD
+              git clean -fdx
+              # Update cache
+              rm -rf "$SUSFS_CACHE_DIR"
+              cp -r "$(pwd)" "$SUSFS_CACHE_DIR"
+            fi
+            cd ..
+          elif [ -d "susfs4ksu/.git" ] && [ -d "susfs4ksu/kernel_patches" ]; then
+            echo "📦 SuSFS exists in workspace, checking for updates..."
+            cd susfs4ksu
+            git fetch origin $SUSFS_BRANCH --depth=1
+            LOCAL=$(git rev-parse HEAD)
+            REMOTE=$(git rev-parse FETCH_HEAD)
+            if [ "$LOCAL" = "$REMOTE" ]; then
+              echo "✅ SuSFS is up to date"
+            else
+              echo "🔄 SuSFS has updates, resetting..."
+              git reset --hard FETCH_HEAD
+              git clean -fdx
+            fi
+            cd ..
+          else
+            echo "📥 Cloning susfs4ksu from scratch..."
+            rm -rf susfs4ksu
+            git clone --depth=1 --single-branch -b $SUSFS_BRANCH \
+              https://gitlab.com/simonpunk/susfs4ksu.git susfs4ksu
+            
+            # Save to cache for future builds
+            if [ ! -d "$SUSFS_CACHE_DIR" ]; then
+              echo "💾 Saving SuSFS to cache..."
+              mkdir -p "$(dirname "$SUSFS_CACHE_DIR")"
+              cp -r susfs4ksu "$SUSFS_CACHE_DIR"
+            fi
+          fi
           
           # Verify susfs4ksu
           if [ -d "susfs4ksu/kernel_patches" ]; then
@@ -198,27 +232,43 @@ jobs:
             exit 1
           fi
 
-      - name: Setup CCACHE
+      # NOTE: CCACHE using ONLY local directory - NO GitHub Actions cache
+      - name: Setup Local CCACHE
         run: |
-          echo "🔧 Setting up CCACHE..."
+          echo "🔧 Setting up LOCAL CCACHE (no GitHub Actions cache)..."
+          
+          # Ensure ccache is in PATH
           export PATH="/usr/lib/ccache:$PATH"
           
+          # Create ccache directory if it doesn't exist
           if [ ! -d "${{ env.CCACHE_DIR }}" ]; then
+            echo "📁 Creating ccache directory: ${{ env.CCACHE_DIR }}"
             sudo mkdir -p "${{ env.CCACHE_DIR }}"
             sudo chown -R $USER:$USER "${{ env.CCACHE_DIR }}"
           fi
           
+          # Configure ccache to use local directory only
           ccache --set-config=cache_dir=${{ env.CCACHE_DIR }}
           ccache --set-config=max_size=${{ env.CCACHE_MAXSIZE }}
           ccache --set-config=sloppiness=file_macro,locale,time_macros
           ccache --set-config=compression=true
           ccache --set-config=compression_level=6
+          ccache --set-config=hash_dir=false
+          
+          echo "📊 CCACHE configuration:"
+          ccache --show-config | grep -E "(cache_dir|max_size|sloppiness|compression)"
           
           echo "📈 CCACHE stats BEFORE build:"
           ccache -s
           
-          HIT_RATE=$(ccache -s | grep -i "cache hit" | head -1 | grep -Eo "[0-9]+\.[0-9]+%" || echo "0%")
-          echo "INITIAL_HIT_RATE=$HIT_RATE" >> $GITHUB_ENV
+          # Calculate and save initial hit rate
+          HIT_RATE=$(ccache -s | grep -i "cache hit rate" | grep -Eo "[0-9]+\.[0-9]+" || echo "0.0")
+          echo "INITIAL_HIT_RATE=${HIT_RATE}%" >> $GITHUB_ENV
+          echo "💾 Initial hit rate: ${HIT_RATE}%"
+          
+          # Show cache size
+          CACHE_SIZE=$(du -sh ${{ env.CCACHE_DIR }} | cut -f1)
+          echo "📦 Current cache size: $CACHE_SIZE"
 
       - name: Clean ABI Exports
         run: |
@@ -391,9 +441,9 @@ jobs:
           export PATH="${{ env.CLANG_BIN }}:/usr/lib/ccache:$PATH"
           export CROSS_COMPILE="${{ env.ARM64_TOOLCHAIN }}"
           export CROSS_COMPILE_COMPAT="${{ env.ARM32_TOOLCHAIN }}"
-
+          
           make ARCH=arm64 LLVM=1 LLVM_IAS=1 LD=ld.lld O=out gki_defconfig
-
+          
           # Base configuration
           cat >> out/.config << 'EOF'
           CONFIG_ARM64_CORTEX_X3=y
@@ -486,7 +536,7 @@ jobs:
               # Add MKSU-specific configs here
               ;;
           esac
-
+          
           # SuSFS configuration
           if [ "${{ env.ENABLE_SUSFS }}" = "true" ]; then
             cat >> out/.config << 'EOF'
@@ -503,7 +553,7 @@ jobs:
           CONFIG_KSU_SUSFS_SUS_MAP=y
           EOF
           fi
-
+          
           make ARCH=arm64 LLVM=1 LLVM_IAS=1 LD=ld.lld O=out olddefconfig
 
       - name: Build Kernel
@@ -513,12 +563,18 @@ jobs:
           export PATH="${{ env.CLANG_BIN }}:/usr/lib/ccache:$PATH"
           export CROSS_COMPILE="${{ env.ARM64_TOOLCHAIN }}"
           export CROSS_COMPILE_COMPAT="${{ env.ARM32_TOOLCHAIN }}"
+          
+          # Force ccache usage
           export CC="ccache clang"
-
+          export CXX="ccache clang++"
+          
+          # Ensure ccache is using our local directory
+          export CCACHE_DIR="${{ env.CCACHE_DIR }}"
+          
           START_TIME=$SECONDS
           
           if [ "${{ env.FORCE_CLEAN }}" = "true" ]; then
-            echo "🧹 Performing clean build..."
+            echo "🧹 Performing clean build (ccache will still be used)..."
             make -j$(nproc) LLVM_IAS=1 LLVM=1 O=out clean
           fi
           
@@ -527,14 +583,25 @@ jobs:
           
           BUILD_TIME=$((SECONDS - START_TIME))
           echo "BUILD_TIME=${BUILD_TIME}s" >> $GITHUB_ENV
+          echo "⏱️ Build completed in ${BUILD_TIME}s"
 
       - name: Check CCACHE Performance
         run: |
           echo "📈 CCACHE stats AFTER build:"
           ccache -s
           
-          FINAL_HIT_RATE=$(ccache -s | grep -i "cache hit" | head -1 | grep -Eo "[0-9]+\.[0-9]+%" || echo "0%")
-          echo "FINAL_HIT_RATE=$FINAL_HIT_RATE" >> $GITHUB_ENV
+          # Get final hit rate
+          FINAL_HIT_RATE=$(ccache -s | grep -i "cache hit rate" | grep -Eo "[0-9]+\.[0-9]+" || echo "0.0")
+          echo "FINAL_HIT_RATE=${FINAL_HIT_RATE}%" >> $GITHUB_ENV
+          echo "💾 Final hit rate: ${FINAL_HIT_RATE}%"
+          
+          # Show final cache size
+          CACHE_SIZE=$(du -sh ${{ env.CCACHE_DIR }} | cut -f1)
+          echo "📦 Final cache size: $CACHE_SIZE"
+          
+          # Show cache stats
+          echo "📊 Detailed cache statistics:"
+          ccache -s | grep -E "(hits|misses|cache size|files in cache)"
 
       - name: Package Kernel
         run: |
@@ -548,13 +615,13 @@ jobs:
           cp ../kernel/out/arch/arm64/boot/Image ./
           [ -f ../kernel/out/arch/arm64/boot/dtbo.img ] && cp ../kernel/out/arch/arm64/boot/dtbo.img ./
           [ -f ../kernel/out/arch/arm64/boot/dtb ] && cp ../kernel/out/arch/arm64/boot/dtb ./
-
+          
           # Copy SuSFS module if enabled
           if [ "${{ env.ENABLE_SUSFS }}" = "true" ] && [ -d "../susfs4ksu/ksu_module_susfs" ]; then
             mkdir -p modules
             cp -r ../susfs4ksu/ksu_module_susfs/* modules/
           fi
-
+          
           TIMESTAMP=$(date +%Y%m%d-%H%M)
           VARIANT_UPPER=$(echo "${{ matrix.variant }}" | tr '[:lower:]' '[:upper:]')
           
@@ -602,6 +669,7 @@ jobs:
             | **SuSFS** | ${{ env.ENABLE_SUSFS == 'true' && '✅ Enabled' || '❌ Disabled' }} |
             | **Build Time** | ${{ env.BUILD_TIME }} |
             | **CCACHE Hit Rate** | ${{ env.FINAL_HIT_RATE }} |
+            | **Cache Type** | 🖥️ Local Only (No GitHub Actions Cache) |
             
             ### 📦 Installation
             1. Flash `${{ env.KERNEL_ZIP }}` in custom recovery
