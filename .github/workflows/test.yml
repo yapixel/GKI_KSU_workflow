@@ -188,13 +188,13 @@ jobs:
 
       - name: Clone Kernel Source
         run: |
-          echo "📦 Cloning kernel source (android14-6.1-2025-09)..."
+          echo "📦 Cloning official Google kernel source (android14-6.1-2025-09)..."
           git clone \
             --depth=1 \
             --branch android14-6.1-2025-09 \
             --single-branch \
-            https://github.com/aosp-mirror/kernel_common.git kernel
-          echo "✅ Kernel source cloned successfully"
+            https://android.googlesource.com/kernel/common kernel
+          echo "✅ Official Google Kernel source cloned successfully"
       - name: Clone SuSFS4KSU
         run: |
           echo "📦 Cloning SuSFS4KSU (gki-android14-6.1-dev)..."
