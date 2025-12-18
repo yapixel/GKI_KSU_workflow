@@ -899,8 +899,8 @@ jobs:
                 # With SuSFS: Use inline hook for sus_kstat
                 echo 'CONFIG_KSU_SUSFS_SUS_KSTAT_USE_INLINE_HOOK=y' >> out/.config
               else
-                # Without SuSFS: Use syscall tracepoints
-                echo 'CONFIG_HAVE_SYSCALL_TRACEPOINTS=y' >> out/.config
+                # Without SuSFS: Use tracepoints
+                echo 'CONFIG_KSU_TRACEPOINT_HOOK=y' >> out/.config
               fi
               ;;
           esac
