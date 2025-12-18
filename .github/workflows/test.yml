@@ -388,7 +388,7 @@ jobs:
               ;;
             "sukisu")
               KSU_REPO="SukiSU-Ultra/SukiSU-Ultra"
-              KSU_BRANCH="builtin"
+              KSU_BRANCH="tmp-builtin"
               USE_SETUP_SH="false"
               echo "📦 Setting up SukiSU-Ultra"
               ;;
