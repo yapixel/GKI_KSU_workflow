@@ -346,6 +346,7 @@ jobs:
       - name: Generate Release Notes
         run: |
           cd release-assets
+          
           cat > RELEASE_NOTES.md << EOF
           ## 🚀 Google Kernel Build #${{ github.run_number }}
           
@@ -358,12 +359,21 @@ jobs:
           ### 📦 Available Variants
           EOF
           
-          # Simplified variant block logic
+          # Use pure Bash for the variant loop
           for v in tiann kowsu mksu sukisu; do
-            ZIP_VAR="${v}_zip"; VERSION_VAR="${v}_ksu_version"
-            if [ -n "${{!ZIP_VAR}}" ]; then
-              echo "#### 🔹 ${v^^} (${{!VERSION_VAR}})" >> RELEASE_NOTES.md
-              echo "- **File:** \`${{!ZIP_VAR}}\`" >> RELEASE_NOTES.md
+            # Map the outputs from the 'build' job to local bash variables
+            # Note: We access the 'needs' context outside the loop, but use Bash for logic
+            case $v in
+              tiann)  ZIP="${{ needs.build.outputs.tiann_zip }}";  KSU="${{ needs.build.outputs.tiann_ksu_version }}" ;;
+              kowsu)  ZIP="${{ needs.build.outputs.kowsu_zip }}";  KSU="${{ needs.build.outputs.kowsu_ksu_version }}" ;;
+              mksu)   ZIP="${{ needs.build.outputs.mksu_zip }}";   KSU="${{ needs.build.outputs.mksu_ksu_version }}" ;;
+              sukisu) ZIP="${{ needs.build.outputs.sukisu_zip }}"; KSU="${{ needs.build.outputs.sukisu_ksu_version }}" ;;
+            esac
+            
+            if [ -n "$ZIP" ]; then
+              V_UPPER=$(echo "$v" | tr '[:lower:]' '[:upper:]')
+              echo "#### 🔹 $V_UPPER ($KSU)" >> RELEASE_NOTES.md
+              echo "- **File:** \`$ZIP\`" >> RELEASE_NOTES.md
             fi
           done
           
@@ -374,7 +384,6 @@ jobs:
           - **Kernel Source:** [Google Android Kernel Common](https://android.googlesource.com/kernel/common)
           - **Actions Run:** https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EOF
-
       - name: Create GitHub Release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
