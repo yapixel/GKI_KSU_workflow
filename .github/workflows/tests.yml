@@ -1,4 +1,4 @@
-name: Build GKI Kernel with KernelSU Variants v4.2.3 (by deepongi@deepongi-labs)
+name: Tests Kernels v4.2.3 (by deepongi@deepongi-labs)
 
 on:
   workflow_dispatch:
