@@ -713,7 +713,25 @@ jobs:
           CONFIG_REGMAP_SPI=y
           CONFIG_MODULE_SIG=n
           CONFIG_MODULE_SIG_FORCE=n
-          
+
+          CONFIG_ARCH_GOOGLE=y
+          CONFIG_SOC_GOOGLE=y
+          CONFIG_BOARD_ZUMA=y
+          CONFIG_SOC_ZUMA=y
+          CONFIG_ZUMA_BTS=y
+          CONFIG_GOOGLE_BMS=y
+          CONFIG_GOOGLE_CHARGER=y
+          CONFIG_GOOGLE_BCL=y
+          CONFIG_DRM_PANEL_GOOGLE=y
+          CONFIG_DRM_SAMSUNG_DPU=y
+          CONFIG_MALI_PIXEL_GPU=y
+          CONFIG_BCMDHD=y
+          CONFIG_SCSI_UFS_EXYNOS=y
+          CONFIG_GOOGLE_THERMAL=y
+          CONFIG_TRUSTY=y
+          CONFIG_GS_CHIPID=y
+          CONFIG_GOOGLE_MODULES=y
+
           # KernelSU Base Config
           CONFIG_KSU=y
           CONFIG_KSU_DEBUG=n
